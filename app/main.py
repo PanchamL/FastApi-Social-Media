@@ -4,7 +4,9 @@ from fastapi import FastAPI,HTTPException, status
 from fastapi.params import Body
 from pydantic import BaseModel
 from random import randrange
-
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import time
 
 from starlette.status import HTTP_201_CREATED, HTTP_404_NOT_FOUND
 
@@ -14,20 +16,31 @@ app = FastAPI()
 
 
 class Post(BaseModel):
-    id = randrange(0,10000)
     title : str
     content : str
-    rating : Optional[int] = None
+    published : bool = True
 
-my_posts = [{"title": "title 1", "content" : "content1", "id": 1},{"title": "title 2", "content" : "content2", "id": 2}]
+
+while True:
+    try:
+        conn = psycopg2.connect(host= 'localhost', database='fastapi', user='postgres', password='madmamu', cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
+        print("Database Connection Succesfull")
+        break
+    except Exception as error:
+        print("Connection Failed")
+        print("error was: ", error)
+        time.sleep(2)
+
+
 
 def find_post(id):
-    for p in my_posts:
+    for p in posts:
         if p["id"] == id:
             return p
 
 def find_index_post(id):
-    for i, p in enumerate(my_posts):
+    for i, p in enumerate(posts):
         if p["id"] == id:
             return i
 
@@ -38,15 +51,20 @@ def root():
 
 @app.get("/posts")
 def get_posts():
-    return {"data": my_posts}
+    cursor.execute(""" SELECT * FROM POSTS """)
+    posts = cursor.fetchall()
+    print(posts)
+    return {"data": posts}
     
 
 @app.post("/posts", status_code= status.HTTP_201_CREATED)
 def create_posts(post: Post):
-    post_dict = post.dict()
-    post_dict['id'] = randrange(1,10000)
-    my_posts.append(post_dict)
-    return {"data" :post_dict}
+    cursor.execute("""INSERT INTO posts (title, content, published) VALUES (%s, %s, %s) RETURNING *;""", (post.title, post.content, post.published))
+    new_post = cursor.fetchone()
+
+    conn.commit() # commit to change
+
+    return {"data" :new_post}
 
 @app.get("/posts/latest")
 def latest_post():
@@ -55,10 +73,12 @@ def latest_post():
 
 @app.get("/posts/{id}")
 def get_post(id: int):
-    post = find_post(id)
-    if not post:
+    cursor.execute("""SELECT * FROM POSTS WHERE id =%s;""", (str(id)))
+    test_post = cursor.fetchone()
+
+    if not test_post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail = f"The post with id : {id} doesn't exist")
-    return {"post" : post}
+    return {"post" : test_post}
 
 @app.delete("/posts/{id}", status_code= status.HTTP_204_NO_CONTENT)
 def del_post(id: int):
